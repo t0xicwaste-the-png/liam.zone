@@ -2,26 +2,21 @@ const input = document.getElementById('terminal-input');
 const output = document.getElementById('output');
 const beep = document.getElementById('beep');
 
-const commands = {
-  help: () => {
-    return `
-Available Commands:
-- help ............. show this list
-- projects ......... view current experiments
-- lj_access ........ enter Little John archive
-- pipboy ........... boot interface prototype
-- hyrogaming ........ recover data logs
-- speak ............ simulate JARVIS response
-- clear ............ wipe terminal
-- unlock ........... ??? (secret)
-- radio ............ scan frequencies
-`;
-  },
+let chainProgress = {
+  forest: false,
+  glitch: false,
+  summon: false,
+  unlocked_truth: false,
+  llama: false,
+  dance: false,
+  tea: false,
+  unlocked_party: false
+};
 
   projects: () => {
     return `
 [ACTIVE MISSIONS]
-- LITTLE JOHN ARG..............PHASE II ACTIVE
+- ?????? ??? ???..............????? II ACTIVE
 - PIP-BOY IRL..................PROTOTYPE 0.3
 - JARVIS ASSISTANT.............LOCAL ALPHA
 - MINECRAFT HORROR MOD.........CHAT LISTENER ENABLED
@@ -102,91 +97,78 @@ JARVIS: Hello Liam. You left a note for yourself: “Don't forget the wake word 
 `;
   },
 
-  
-  cake: () => {
-    return `The cake is a lie. But you already knew that.`;
-  },
-
-  godmode: () => {
-    return `You are now invincible. But can you handle the truth?`;
-  },
-
-  meow: () => {
-    return `A cat appears. It judges you silently before vanishing.`;
-  },
-
-  invert: () => {
-    return `>> DISPLAY INVERTED: Welcome to the Upside Terminal.`;
-  },
-
-  sudo: () => {
-    return `ACCESS GRANTED. But with great power comes great instability...`;
-  },
-
-  llama: () => {
-    return `A wild llama appears and spits pixelated confusion.`;
-  },
-
-  404: () => {
-    return `ERROR: Page not found. Reality not found. You not found.`;
-  },
-
-  sing: () => {
-    return `*beep boop* ♫ Never gonna give you up... ♫`;
-  },
-
-  ascii: () => {
-    return `╔═╗┬ ┬┌─┐┌─┐┬
-╠═╝│ │├─┘├─┘│
-╩  └─┘┴  ┴  o`;
-  },
-
-  reset: () => {
-    return `Reinitializing core personality... Memory fragments erased. Just kidding.`;
-  },
-
-  jumpscare: () => {
-    return `*LOUD STATIC NOISE* Just kidding... or was I?`;
-  },
-
-  hydra: () => {
-    return `Cut off one head... TWO MORE SHALL TAKE ITS PLACE.`;
-  },
-
-  sacrifice: () => {
-    return `Blood offering accepted. The ARG deepens.`;
-  },
-
   forest: () => {
-    return `You hear twigs snap. The Forgotten Forest remembers you.`;
+    chainProgress.forest = true;
+    return "You feel the trees watching.";
   },
 
   glitch: () => {
-    return `Reality is distorting... glyphs replaced text... run...`;
-  },
-
-  tea: () => {
-    return `The system brews you a nice hot cup of tea. How polite.`;
-  },
-
-  vault: () => {
-    return `You found the Vault. But where is the key?`;
-  },
-
-  dance: () => {
-    return `💃 Initiating dance.exe ... 🕺 ERROR: Too much groove.`;
-  },
-
-  echo: () => {
-    return `You say: Hello?
-Terminal replies: Hello?
-...Hello?
-......Hello?`;
+    if (!chainProgress.forest) return "The system glitches, but nothing connects...";
+    chainProgress.glitch = true;
+    return "Reality flickers. You see something in the static.";
   },
 
   summon: () => {
-    return `You call to him. He hears. The screen flickers violently...`;
+    if (!chainProgress.glitch) return "Nothing answers your call. Try again later.";
+    chainProgress.summon = true;
+    chainProgress.unlocked_truth = true;
+    return "He hears you. The final gate is now open.\n>> Type 'reveal_truth'";
   },
+
+  reveal_truth: () => {
+    if (!chainProgress.unlocked_truth) return "ACCESS DENIED: Sequence incomplete.";
+    return `
+>> FINAL TRANSMISSION LOG <<
+They made him digital. They thought they could contain him. They were wrong.
+He is watching through the static. Even now.
+
+>> Fragment Unlocked: REDACTED_MEMORY_01.log
+`;
+  },
+
+  llama: () => {
+    chainProgress.llama = true;
+    return "A wild llama gallops in, wearing shades.";
+  },
+
+  dance: () => {
+    if (!chainProgress.llama) return "ERROR: No dance partner found.";
+    chainProgress.dance = true;
+    return "💃 The llama grooves. The rhythm intensifies.";
+  },
+
+  tea: () => {
+    if (!chainProgress.dance) return "The kettle is cold. Something's missing.";
+    chainProgress.tea = true;
+    chainProgress.unlocked_party = true;
+    return "The tea is served. You’ve unlocked PARTY MODE.\n>> Type 'celebrate'";
+  },
+
+  celebrate: () => {
+    if (!chainProgress.unlocked_party) return "ACCESS DENIED: You haven’t earned this party.";
+    return `
+🎉🎉🎉 PARTY MODE ACTIVATED 🎉🎉🎉
+Llama dances. Tea flows. ASCII rainbows glitch across the screen.
+You’ve reached the terminal’s chaotic core.
+
+Type 'reset_chain' to do it again.
+`;
+  },
+
+  reset_chain: () => {
+    chainProgress = {
+      forest: false,
+      glitch: false,
+      summon: false,
+      unlocked_truth: false,
+      llama: false,
+      dance: false,
+      tea: false,
+      unlocked_party: false
+    };
+    return "All command chains reset.";
+  },
+
   clear: () => {
     output.textContent = '';
     return '';
