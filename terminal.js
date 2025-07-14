@@ -190,7 +190,7 @@ Terminal replies: Hello?
   clear: () => {
     output.textContent = '';
     return '';
-  }
+  },
 
   wow: () => {
     return ‘I know so cool’;
