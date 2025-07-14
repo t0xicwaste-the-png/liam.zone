@@ -1,6 +1,5 @@
 const input = document.getElementById('terminal-input');
 const output = document.getElementById('output');
-const beep = document.getElementById('beep');
 
 const commands = {
   help: () => {
@@ -201,7 +200,6 @@ Terminal replies: Hello?
 input.addEventListener('keydown', function(e) {
   if (e.key === 'Enter') {
     const cmd = input.value.trim();
-    beep.play();
     output.innerText += `\n> ${cmd}\n`;
     if (commands[cmd]) {
       const result = commands[cmd]();
