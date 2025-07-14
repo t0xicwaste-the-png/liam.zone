@@ -183,31 +183,36 @@ Terminal replies: Hello?
 ......Hello?`;
   },
 
-  summon: () => {
-    return `You call to him. He hears. The screen flickers violently...`;
-  },
-  clear: () => {
-    output.textContent = '';
-    return '';
-  },
-
-  wow: () => {
-    return ‘I know so cool’;
-  }
-
-};
-
 input.addEventListener('keydown', function(e) {
   if (e.key === 'Enter') {
     const cmd = input.value.trim();
-    output.innerText += `\n> ${cmd}\n`;
-    if (commands[cmd]) {
-      const result = commands[cmd]();
-      output.innerText += result;
-    } else {
-      output.innerText += `Command not recognized.`;
+    input.value = ''; // Clear the input field right away
+
+    // Get the current text content, but remove the trailing underscore
+    let currentOutput = output.innerText.replace(/_\s*$/, '');
+
+    // Handle 'clear' as a special case
+    if (cmd === 'clear') {
+      output.innerText = '_'; // Reset the screen with just the cursor
+      return; // Stop here
     }
-    input.value = '';
+
+    // For all other commands, build the new output string
+    const commandLine = `> ${cmd}\n`;
+    let resultText = '';
+
+    if (commands[cmd]) {
+      // The original 'clear' function is now ignored because we handle it above
+      resultText = commands[cmd]();
+    } else {
+      resultText = `Command not recognized.`;
+    }
+
+    // Combine the old content, the new command, the result, and the new cursor
+    output.innerText = currentOutput + commandLine + resultText + '\n_';
+
+    // Scroll to the bottom
     window.scrollTo(0, document.body.scrollHeight);
   }
 });
+ 
