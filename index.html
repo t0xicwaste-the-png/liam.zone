@@ -5,11 +5,8 @@
   <title>LIAM-ZONE // PERSONAL TERMINAL</title>
   <link rel="stylesheet" href="style.css">
   <script src="terminal.js" defer></script>
-</head>
-<body>
-  <div id="crt">
-    <div id="screen">
-      <pre id="output">
+<div id="screen">
+  <pre id="output">
 == LIAM ZONE ==
 
 > SYSTEM INITIALIZED.
@@ -17,9 +14,8 @@
 > Welcome, USER_001.
 > Type 'help' for commands.
 _
-      </pre>
-      <input id="terminal-input" autofocus />
-    </div>
-  </div>
-</body>
-</html>
+  </pre>
+  <form id="terminal-form">
+    <input id="terminal-input" />
+  </form>
+</div>
