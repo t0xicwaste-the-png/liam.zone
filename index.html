@@ -444,6 +444,7 @@ You can reach out via:
                 'dog': { secret: true, execute: () => appendOutput(ascii.dog) },
                 'coffee': { secret: true, execute: () => appendOutput(`Brewing... \n${ascii.coffee}`) },
                 'sudo': { secret: true, execute: () => appendOutput('User is not in the sudoers file. This incident will be reported.') },
+                'goon': { secret: true, execute: () => appendOutput('You start to goon but something is off...') },
                 'reboot': {
                     secret: true,
                     execute: () => {
