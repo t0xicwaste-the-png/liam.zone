@@ -12,6 +12,8 @@
         :root {
             --main-color: #00ff41;
             --background-color: #000;
+            /* Glow color is no longer used for glow, but for theme consistency */
+            --glow-color: #00ff41; 
         }
 
         html, body {
@@ -27,7 +29,7 @@
             font-size: 1.2rem;
         }
 
-        /* --- CRT Monitor Effect --- */
+        /* --- CRT Monitor Effect (Scanlines only) --- */
         .crt-container {
             position: relative;
             height: 100vh;
@@ -52,7 +54,6 @@
             z-index: 2;
             background-size: 100% 2px, 3px 100%;
             pointer-events: none;
-            animation: flicker 0.15s infinite;
         }
 
         .crt-container::after {
@@ -69,31 +70,25 @@
             pointer-events: none;
             animation: scanline 10s linear infinite;
         }
-
-        @keyframes flicker {
-            0% { opacity: 0.2; }
-            20% { opacity: 0.8; }
-            40% { opacity: 0.3; }
-            60% { opacity: 1; }
-            80% { opacity: 0.2; }
-            100% { opacity: 1; }
-        }
-
+        
         @keyframes scanline {
             0% { transform: translateY(0%); }
             100% { transform: translateY(100%); }
         }
 
-        /* --- Terminal Styling --- */
+        /* --- Terminal Styling (No Glow) --- */
         #terminal {
             width: 100%;
             height: 100%;
-            /* The border has been removed as requested */
-            background-color: rgba(0, 10, 0, 0.2);
-            box-shadow: 0 0 25px var(--glow-color), inset 0 0 20px rgba(0, 255, 65, 0.3);
+            border-radius: 10px;
+            background-color: rgba(0, 0, 0, 0.5);
+            /* Removed glow, added subtle inset shadow for depth */
+            box-shadow: inset 0 0 10px rgba(0, 20, 0, 0.5);
+            border: 1px solid rgba(0, 255, 65, 0.2);
             overflow-y: auto;
+            padding: 1.5rem;
             box-sizing: border-box;
-            text-shadow: 0 0 5px var(--glow-color);
+            /* Removed text-shadow */
             display: flex;
             flex-direction: column;
         }
@@ -120,15 +115,11 @@
             font-family: 'VT323', monospace;
             font-size: 1.2rem;
             flex-grow: 1;
-            text-shadow: 0 0 5px var(--glow-color);
+            /* Removed text-shadow */
         }
 
         #commandInput:focus {
             outline: none;
-        }
-
-        .command-output {
-            margin-bottom: 0.5em;
         }
         
         a {
@@ -160,6 +151,7 @@
             const output = document.getElementById('output');
             const commandInput = document.getElementById('commandInput');
             const terminal = document.getElementById('terminal');
+            const startTime = new Date();
             
             let commandHistory = [];
             let historyIndex = -1;
@@ -170,7 +162,8 @@
                 reactor: { calibrated: false, engaged: false, online: false },
                 dungeon: { inDungeon: false, position: 'start', hasKey: false, doorUnlocked: false, treasureOpened: false },
                 guessTheNumber: { active: false, secretNumber: 0, attempts: 0 },
-                stats: { commandsRun: 0, secretsFound: 0 }
+                foundSecrets: new Set(),
+                commandsRun: 0
             };
 
             // --- Helper Functions ---
@@ -185,136 +178,42 @@
                 terminal.scrollTop = terminal.scrollHeight;
             };
 
-            const clearOutput = () => {
-                output.innerHTML = '';
-            };
-
+            const clearOutput = () => { output.innerHTML = ''; };
             const getRandomItem = (arr) => arr[Math.floor(Math.random() * arr.length)];
+            
+            // --- Crypto Library (for md5/sha256) ---
+            // A simple, self-contained SHA256 implementation.
+            async function sha256(message) {
+                const msgBuffer = new TextEncoder().encode(message);
+                const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                return hashHex;
+            }
+            // MD5 is insecure and not available in Web Crypto. This is a simple simulation.
+            function md5_sim(str) {
+                let hash = 0;
+                for (let i = 0; i < str.length; i++) {
+                    const char = str.charCodeAt(i);
+                    hash = (hash << 5) - hash + char;
+                    hash |= 0; // Convert to 32bit integer
+                }
+                return Math.abs(hash).toString(16).padStart(8, '0');
+            }
+
 
             // --- Data for Random Commands ---
-            const jokes = [
-                "Why don't scientists trust atoms? Because they make up everything!",
-                "I told my wife she should embrace her mistakes. She gave me a hug.",
-                "Why did the scarecrow win an award? Because he was outstanding in his field!",
-                "What do you call a fake noodle? An Impasta."
-            ];
-            const fortunes = [
-                "The journey of a thousand miles begins with a single command.",
-                "You will soon find a bug in your code that you thought was a feature.",
-                "A wise man once said nothing. He was compiling.",
-                "Your next commit will be a masterpiece."
-            ];
-            const quotes = [
-                `"The computer was born to solve problems that did not exist before." - Bill Gates`,
-                `"Talk is cheap. Show me the code." - Linus Torvalds`,
-                `"Any fool can write code that a computer can understand. Good programmers write code that humans can understand." - Martin Fowler`
-            ];
-            const magic8ballAnswers = [
-                'It is certain.', 'Without a doubt.', 'Yes, definitely.', 'You may rely on it.', 
-                'As I see it, yes.', 'Most likely.', 'Outlook good.', 'Yes.', 'Signs point to yes.',
-                'Reply hazy, try again.', 'Ask again later.', 'Better not tell you now.', 'Cannot predict now.',
-                'Concentrate and ask again.', 'Don\'t count on it.', 'My reply is no.', 'My sources say no.',
-                'Outlook not so good.', 'Very doubtful.'
-            ];
+            const jokes = [ "Why don't scientists trust atoms? Because they make up everything!", "I told my wife she should embrace her mistakes. She gave me a hug.", "Why did the scarecrow win an award? Because he was outstanding in his field!", "What do you call a fake noodle? An Impasta." ];
+            const fortunes = [ "The journey of a thousand miles begins with a single command.", "You will soon find a bug in your code that you thought was a feature.", "A wise man once said nothing. He was compiling.", "Your next commit will be a masterpiece." ];
+            const quotes = [ `"The computer was born to solve problems that did not exist before." - Bill Gates`, `"Talk is cheap. Show me the code." - Linus Torvalds`, `"Any fool can write code that a computer can understand. Good programmers write code that humans can understand." - Martin Fowler` ];
+            const magic8ballAnswers = [ 'It is certain.', 'Without a doubt.', 'Yes, definitely.', 'You may rely on it.', 'As I see it, yes.', 'Most likely.', 'Outlook good.', 'Yes.', 'Signs point to yes.', 'Reply hazy, try again.', 'Ask again later.', 'Better not tell you now.', 'Cannot predict now.', 'Concentrate and ask again.', 'Don\'t count on it.', 'My reply is no.', 'My sources say no.', 'Outlook not so good.', 'Very doubtful.' ];
 
             // --- ASCII Art ---
             const ascii = {
-                cat: `
-    /\\_/\\
-   ( o.o )
-    > ^ <
-                `,
-                dog: `
-      __
- o-''|\\_____/|
-  \\_ /|__,   _
-     \\|   )  |
-     ||"" '   |
-     ||   |   |
-     ||   |   |
-     ||___|___|
-                `,
-                coffee: `
-       ;,'
-   _o_ ;
-,-.'--- .
-| |   | |
-| |   | |
-| |   | |
-\`.___.'
-                `,
-                skull: `
-       .-.
-      (o.o)
-       |=|
-      __|__
-    //.=|=.\\\\
-   // .=|=. \\\\
-   \\\\ .=|=. //
-    \\\\(_=_)//
-     (:| |:)
-      || ||
-      () ()
-      || ||
-      || ||
-     ==' '==
-                `,
-                rocket: `
-      /\\
-     /  \\
-    /    \\
-   |      |
-   |LIAM-Z|
-  /|------|\\
- / |      | \\
-/  |______|  \\
-   |______|
-   /______\\
-    / /\\ \\
-   /_/  \\_\\
-                `,
-                heart: `
-   .--.   .--.
-  /    \\./    \\
- /      '      \\
- \\            /
-  \\          /
-   \\        /
-    \\      /
-     \\    /
-      \\  /
-       \\/
-                `,
-                star: `
-      '
-   \\  '  /
-    '--'--'
-    /--.--\\
-   /  '  \\
-      '
-                `,
-                sl: `
-       H H H
-     H H H H H
-   H H H H H H H
-   H H H H H H H
-   H H H H H H H
-  I I I I I I I I
-  I I I I I I I I
-  I I I I I I I I
-=====================
-|___________________|
-  | ____________ |
-  | |          | |
-  | |          | |
- o| |__________| |o
- o|______________|o
-   oo          oo
-                `
+                cat: `\n    /\\_/\\\n   ( o.o )\n    > ^ <\n`, dog: `\n      __\n o-''|\\_____/|\n  \\_ /|__,   _\n     \\|   )  |\n     ||"" '   |\n     ||   |   |\n     ||   |   |\n     ||___|___|\n`, coffee: `\n       ;,'\n   _o_ ;\n,-.'--- .\n| |   | |\n| |   | |\n| |   | |\n\`.___.'\n`, skull: `\n       .-.\n      (o.o)\n       |=|\n      __|__\n    //.=|=.\\\\\n   // .=|=. \\\\\n   \\\\ .=|=. //\n    \\\\(_=_)//\n     (:| |:)\n      || ||\n      () ()\n      || ||\n      || ||\n     ==' '==\n`, rocket: `\n      /\\\n     /  \\\n    /    \\\n   |      |\n   |LIAM-Z|\n  /|------|\\\n / |      | \\\n/  |______|  \\\n   |______|\n   /______\\\n    / /\\ \\\n   /_/  \\_\\\n`, heart: `\n   .--.   .--.\n  /    \\./    \\\n /      '      \\\n \\            /\n  \\          /\n   \\        /\n    \\      /\n     \\    /\n      \\  /\n       \\/\n`, star: `\n      '\n   \\  '  /\n    '--'--'\n    /--.--\\\n   /  '  \\\n      '\n`, sl: `\n       H H H\n     H H H H H\n   H H H H H H H\n   H H H H H H H\n   H H H H H H H\n  I I I I I I I I\n  I I I I I I I I\n  I I I I I I I I\n=====================\n|___________________|\n  | ____________ |\n  | |          | |\n  | |          | |\n o| |__________| |o\n o|______________|o\n   oo          oo\n`
             };
             
             // --- Command Definitions ---
-            // The command object is easily expandable. Just add a new key with a command object.
             const commands = {
                 // --- Standard Commands ---
                 'help': {
@@ -326,208 +225,109 @@
                                 helpText += `${cmd.padEnd(15)} - ${commands[cmd].description}\n`;
                             }
                         });
-                        helpText += '\nHint: There are many secret commands and quests to discover.';
+                        helpText += '\nHint: There are many secret commands and quests to discover. You can even echo your own thoughts.';
                         appendOutput(helpText);
                     }
                 },
                 'about': {
                     description: 'Displays information about Liam.',
-                    execute: () => {
-                        appendOutput(`
-Hello! I'm Liam, a passionate developer and creator.
-I love building interesting things with code, exploring new technologies,
-and bringing ideas to life. This terminal is one of my fun side projects.
-Feel free to explore!
-
-System Maintenance Code: LX-2025
-                        `);
-                    }
+                    execute: () => { appendOutput(`\nHello! I'm Liam, a passionate developer and creator.\nI love building things from the ground up, like a virtual rocket to the stars.\nThis terminal is one of my fun side projects.\nFeel free to explore!\n\nSystem Maintenance Code: LX-2025`); }
                 },
                 'projects': {
                     description: 'Lists Liam\'s projects.',
-                    execute: () => {
-                        appendOutput(`
-Projects:
-- <a href="#" onclick="return false;">Project Alpha</a>   - A web-based data visualization tool.
-- <a href="#" onclick="return false;">Project Beta</a>    - A mobile game about space exploration.
-- <a href="#" onclick="return false;">Project Gamma</a>   - An open-source library for machine learning.
-- <a href="#" onclick="return false;">This Terminal</a> - You're looking at it!
-                        `);
-                    }
+                    execute: () => { appendOutput(`\nProjects:\n- <a href="#" onclick="return false;">Project Alpha</a>   - A web-based data visualization tool. I had to structure the files like a tree.\n- <a href="#" onclick="return false;">Project Beta</a>    - A mobile game about space exploration.\n- <a href="#" onclick="return false;">Project Gamma</a>   - An open-source library for machine learning.\n- <a href="#" onclick="return false;">This Terminal</a> - You're looking at it!`); }
                 },
                 'contact': {
                     description: 'Shows contact information.',
-                    execute: () => {
-                        appendOutput(`
-You can reach out via:
-- Email: liam.dev@example.com
-- GitHub: <a href="https://github.com" target="_blank">github.com/liam</a>
-- LinkedIn: <a href="https://linkedin.com" target="_blank">linkedin.com/in/liam</a>
-                        `);
-                    }
+                    execute: () => { appendOutput(`\nYou can reach out via:\n- Email: liam.dev@example.com\n- GitHub: <a href="https://github.com" target="_blank">github.com/liam</a>\n- LinkedIn: <a href="https://linkedin.com" target="_blank">linkedin.com/in/liam</a>\n\nP.S. My lucky number is 8.`); }
                 },
                 'clear': { description: 'Clears the terminal screen.', execute: clearOutput },
                 'date': { description: 'Displays the current date.', execute: () => appendOutput(new Date().toDateString()) },
-                'time': { description: 'Displays the current time.', execute: () => appendOutput(new Date().toLocaleTimeString()) },
-                'history': {
-                    description: 'Shows your command history.',
-                    execute: () => {
-                        let historyText = 'Command History:\n';
-                        commandHistory.forEach((cmd, index) => {
-                            historyText += `${index + 1}: ${cmd}\n`;
-                        });
-                        appendOutput(historyText);
-                    }
-                },
-                 // --- Games ---
-                'guess': {
-                    description: 'Start or play "Guess the Number". Usage: guess [number]',
+                'time': { description: 'Displays the current time.', execute: () => { let output = new Date().toLocaleTimeString(); if (Math.random() < 0.1) { output += "\nTime to roll the dice?"; } appendOutput(output); }},
+                'history': { description: 'Shows your command history.', execute: () => { let historyText = 'Command History:\n'; commandHistory.forEach((cmd, index) => { historyText += `${index + 1}: ${cmd}\n`; }); appendOutput(historyText); } },
+                'calc': {
+                    description: 'A simple calculator. Usage: calc [expression]',
                     execute: (args) => {
-                        let game = gameState.guessTheNumber;
-                        if (!game.active) {
-                            game.active = true;
-                            game.secretNumber = Math.floor(Math.random() * 100) + 1;
-                            game.attempts = 0;
-                            appendOutput('I\'m thinking of a number between 1 and 100. Try to guess it!');
-                            return;
-                        }
-                        const userGuess = parseInt(args[0]);
-                        if (isNaN(userGuess)) {
-                            appendOutput('That\'s not a number! Try again.');
-                            return;
-                        }
-                        game.attempts++;
-                        if (userGuess < game.secretNumber) {
-                            appendOutput('Higher...');
-                        } else if (userGuess > game.secretNumber) {
-                            appendOutput('Lower...');
-                        } else {
-                            appendOutput(`Correct! The number was ${game.secretNumber}. You guessed it in ${game.attempts} attempts.`);
-                            game.active = false;
-                        }
+                        const expression = args.join(' ');
+                        if (!expression) { appendOutput('Usage: calc [mathematical expression]. Example: calc 5 * (2 + 3)'); return; }
+                        try {
+                            const result = new Function('return ' + expression)();
+                            appendOutput(result.toString() + "\nSome numbers are best kept secure with a good hash.");
+                        } catch (error) { appendOutput(`Error: Invalid expression "${expression}"`); }
                     }
                 },
-                'rps': {
-                    description: 'Play Rock, Paper, Scissors. Usage: rps [rock|paper|scissors]',
-                    execute: (args) => {
-                        const choices = ['rock', 'paper', 'scissors'];
-                        const playerChoice = args[0]?.toLowerCase();
-                        if (!choices.includes(playerChoice)) {
-                            appendOutput('Invalid choice. Please choose rock, paper, or scissors.');
-                            return;
-                        }
-                        const computerChoice = choices[Math.floor(Math.random() * choices.length)];
-                        appendOutput(`You chose: ${playerChoice}\nComputer chose: ${computerChoice}`);
-                        if (playerChoice === computerChoice) {
-                            appendOutput('It\'s a tie!');
-                        } else if (
-                            (playerChoice === 'rock' && computerChoice === 'scissors') ||
-                            (playerChoice === 'paper' && computerChoice === 'rock') ||
-                            (playerChoice === 'scissors' && computerChoice === 'paper')
-                        ) {
-                            appendOutput('You win!');
-                        } else {
-                            appendOutput('You lose!');
-                        }
-                    }
-                },
+                // --- Games ---
+                'guess': { description: 'Start or play "Guess the Number". Usage: guess [number]', execute: (args) => { /* ... game logic ... */ } },
+                'rps': { description: 'Play Rock, Paper, Scissors. Usage: rps [rock|paper|scissors]', execute: (args) => { /* ... game logic ... */ } },
+
                 // --- Secret Commands ---
+                'echo': { secret: true, execute: (args) => appendOutput(args.join(' ')) },
+                'hostname': { secret: true, execute: () => appendOutput('liam-zone-main-server') },
+                'ip': { secret: true, execute: () => appendOutput('10.0.0.42') },
+                'uptime': { secret: true, execute: () => {
+                    const now = new Date();
+                    const diff = Math.floor((now - startTime) / 1000);
+                    const hours = Math.floor(diff / 3600);
+                    const minutes = Math.floor((diff % 3600) / 60);
+                    const seconds = diff % 60;
+                    appendOutput(`System has been up for ${hours}h ${minutes}m ${seconds}s.`);
+                }},
+                'tree': { secret: true, execute: () => {
+                    const fileTree = `
+.
+├── projects/
+│   ├── project_alpha.info
+│   ├── project_beta.info
+│   └── project_gamma.info
+├── games/
+│   ├── guess_the_number.exe
+│   └── rps.exe
+└── secrets/
+    ├── vault.key
+    ├── reactor_codes.txt
+    └── dungeon_map.dat`;
+                    appendOutput(fileTree);
+                }},
+                'md5': { secret: true, execute: (args) => {
+                    if (args.length === 0) { appendOutput('Usage: md5 [text]'); return; }
+                    appendOutput(`MD5(simulated): ${md5_sim(args.join(' '))}`);
+                }},
+                'sha256': { secret: true, execute: async (args) => {
+                    if (args.length === 0) { appendOutput('Usage: sha256 [text]'); return; }
+                    const hash = await sha256(args.join(' '));
+                    appendOutput(`SHA256: ${hash}`);
+                }},
+                'emojify': { secret: true, execute: (args) => {
+                    if (args.length === 0) { appendOutput('Usage: emojify [text]'); return; }
+                    let text = args.join(' ');
+                    text = text.replace(/star/gi, '⭐').replace(/heart/gi, '❤️').replace(/cat/gi, '🐱').replace(/dog/gi, '🐶').replace(/coffee/gi, '☕️').replace(/pizza/gi, '🍕').replace(/rocket/gi, '🚀');
+                    appendOutput(text);
+                }},
                 'matrix': { secret: true, execute: () => appendOutput('The matrix has you...') },
-                'rickroll': {
-                    secret: true,
-                    execute: () => {
-                        appendOutput('Never gonna give you up...');
-                        setTimeout(() => window.open('https://www.youtube.com/watch?v=dQw4w9WgXcQ', '_blank'), 1000);
-                    }
-                },
+                'rickroll': { secret: true, execute: () => { appendOutput('Never gonna give you up...'); setTimeout(() => window.open('https://www.youtube.com/watch?v=dQw4w9WgXcQ', '_blank'), 1000); } },
                 'cat': { secret: true, execute: () => appendOutput(ascii.cat) },
                 'dog': { secret: true, execute: () => appendOutput(ascii.dog) },
-                'coffee': { secret: true, execute: () => appendOutput(`Brewing... \n${ascii.coffee}`) },
+                'coffee': { secret: true, execute: () => appendOutput(`Brewing... ${ascii.coffee}\nSometimes I need a good quote to get started.`) },
                 'sudo': { secret: true, execute: () => appendOutput('User is not in the sudoers file. This incident will be reported.') },
-                'goon': { secret: true, execute: () => appendOutput('You start to goon but something is off...') },
-                'reboot': {
-                    secret: true,
-                    execute: () => {
-                        appendOutput('Rebooting system...');
-                        setTimeout(() => {
-                            // Reset all game states
-                            gameState = {
-                                vault: { passwordEntered: false, treasureCollected: false },
-                                reactor: { calibrated: false, engaged: false, online: false },
-                                dungeon: { inDungeon: false, position: 'start', hasKey: false, doorUnlocked: false, treasureOpened: false },
-                                guessTheNumber: { active: false, secretNumber: 0, attempts: 0 },
-                                stats: { commandsRun: 0, secretsFound: 0 }
-                            };
-                            clearOutput();
-                            typeWelcomeMessage();
-                        }, 2000);
-                    }
-                },
-                'hacker': {
-                    secret: true,
-                    execute: () => {
-                        let i = 0;
-                        const messages = ['Accessing mainfraime...','Bypassing firewall...','Decrypting secure files...','Downloading sensitive data...','Access granted. You are in.'];
-                        const interval = setInterval(() => {
-                            if (i < messages.length) {
-                                appendOutput(messages[i]);
-                                i++;
-                            } else { clearInterval(interval); }
-                        }, 500);
-                    }
-                },
+                'reboot': { secret: true, execute: () => { appendOutput('Rebooting system...'); setTimeout(() => { gameState = { vault: { passwordEntered: false, treasureCollected: false }, reactor: { calibrated: false, engaged: false, online: false }, dungeon: { inDungeon: false, position: 'start', hasKey: false, doorUnlocked: false, treasureOpened: false }, guessTheNumber: { active: false, secretNumber: 0, attempts: 0 }, foundSecrets: new Set(), commandsRun: 0 }; clearOutput(); typeWelcomeMessage(); }, 2000); } },
+                'hacker': { secret: true, execute: () => { /* ... hacker sequence ... */ } },
                 'skull': { secret: true, execute: () => appendOutput(ascii.skull) },
-                'color': {
-                    secret: true,
-                    execute: (args) => {
-                        if (args.length > 0) {
-                            const newColor = args[0];
-                            try {
-                                document.documentElement.style.setProperty('--main-color', newColor);
-                                document.documentElement.style.setProperty('--glow-color', newColor);
-                                appendOutput(`Terminal color changed to ${newColor}.`);
-                            } catch (e) {
-                                appendOutput(`Error: Invalid color "${newColor}". Try a valid CSS color.`);
-                            }
-                        } else {
-                            appendOutput('Usage: color [css-color]. Example: color hotpink');
-                        }
-                    }
-                },
-                // --- NEW SECRET COMMANDS ---
+                'color': { secret: true, execute: (args) => { /* ... color logic ... */ } },
                 'fortune': { secret: true, execute: () => appendOutput(getRandomItem(fortunes)) },
                 'joke': { secret: true, execute: () => appendOutput(getRandomItem(jokes)) },
                 'quote': { secret: true, execute: () => appendOutput(getRandomItem(quotes)) },
-                '8ball': { secret: true, execute: (args) => {
-                    if (args.length === 0) {
-                        appendOutput('Please ask a question. Usage: 8ball [your question]');
-                    } else {
-                        appendOutput(getRandomItem(magic8ballAnswers));
-                    }
-                }},
-                'whoami': { secret: true, execute: () => appendOutput('A curious user, exploring the digital depths.') },
-                'ping': { secret: true, execute: () => appendOutput('PONG! Latency: 42ms. All systems nominal.') },
-                'uname': { secret: true, execute: () => appendOutput('LIAM-ZONE v3.0.0-release on-line') },
+                '8ball': { secret: true, execute: (args) => { if (args.length === 0) { appendOutput('Please ask a question. Usage: 8ball [your question]'); } else { appendOutput(getRandomItem(magic8ballAnswers)); } } },
+                'whoami': { secret: true, execute: () => appendOutput('A curious user, exploring the digital depths of this host.') },
+                'ping': { secret: true, execute: () => appendOutput('PONG! It\'s like a magic 8-ball, always responsive.') },
+                'uname': { secret: true, execute: () => appendOutput('LIAM-ZONE v5.0.0-release on-line') },
                 'beep': { secret: true, execute: () => appendOutput('Beep!') },
                 'lorem': { secret: true, execute: () => appendOutput('Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.') },
                 'reverse': { secret: true, execute: (args) => appendOutput(args.join(' ').split('').reverse().join('')) },
-                'binary': { secret: true, execute: (args) => {
-                    if (args.length === 0) { appendOutput('Usage: binary [text]'); return; }
-                    const text = args.join(' ');
-                    const binary = text.split('').map(char => char.charCodeAt(0).toString(2)).join(' ');
-                    appendOutput(binary);
-                }},
-                'cowsay': { secret: true, execute: (args) => {
-                    const message = args.length > 0 ? args.join(' ') : 'Moooo!';
-                    const cow = `
-        \\   ^__^
-         \\  (oo)\\_______
-            (__)\\       )\\/\\
-                ||----w |
-                ||     ||
-`;
-                    appendOutput(`< ${message} >\n${cow}`);
-                }},
+                'binary': { secret: true, execute: (args) => { if (args.length === 0) { appendOutput('Usage: binary [text]'); return; } const text = args.join(' '); const binary = text.split('').map(char => '0' + char.charCodeAt(0).toString(2)).join(' '); appendOutput(binary + "\nThere are other ways to encode data, like base64."); } },
+                'hex': { secret: true, execute: (args) => { if (args.length === 0) { appendOutput('Usage: hex [text]'); return; } const text = args.join(' '); const hex = text.split('').map(char => char.charCodeAt(0).toString(16)).join(' '); appendOutput(hex); } },
+                'base64': { secret: true, execute: (args) => { const action = args[0]; const str = args.slice(1).join(' '); if (action === 'encode') { appendOutput(btoa(str)); } else if (action === 'decode') { try { appendOutput(atob(str)); } catch (e) { appendOutput('Error: Invalid Base64 string.'); } } else { appendOutput('Usage: base64 [encode|decode] [string]'); } } },
+                'rot13': { secret: true, execute: (args) => { if (args.length === 0) { appendOutput('Usage: rot13 [text]'); return; } const text = args.join(' '); const result = text.replace(/[a-zA-Z]/g, function(c) { return String.fromCharCode((c <= "Z" ? 90 : 122) >= (c = c.charCodeAt(0) + 13) ? c : c - 26); }); appendOutput(result); } },
+                'cowsay': { secret: true, execute: (args) => { /* ... cowsay logic ... */ } },
                 'sl': { secret: true, execute: () => appendOutput(ascii.sl) },
                 'rocket': { secret: true, execute: () => appendOutput(ascii.rocket) },
                 'heart': { secret: true, execute: () => appendOutput(ascii.heart) },
@@ -535,74 +335,35 @@ You can reach out via:
                 'weather': { secret: true, execute: () => appendOutput('Forecast: 100% chance of awesome.') },
                 'inspire': { secret: true, execute: () => appendOutput('"The best way to predict the future is to invent it." - Alan Kay') },
                 'zen': { secret: true, execute: () => appendOutput('Beautiful is better than ugly.\nExplicit is better than implicit.\nSimple is better than complex.') },
-                'countdown': { secret: true, execute: () => {
-                    let count = 3;
-                    const interval = setInterval(() => {
-                        if (count > 0) {
-                            appendOutput(`${count}...`);
-                            count--;
-                        } else {
-                            appendOutput('LIFTOFF!');
-                            clearInterval(interval);
-                        }
-                    }, 700);
-                }},
+                'countdown': { secret: true, execute: () => { /* ... countdown logic ... */ } },
                 'panic': { secret: true, execute: () => appendOutput('Kernel Panic: A critical error occurred. Please remain calm.') },
-                'roll': { secret: true, execute: (args) => {
-                    const input = args[0] || '1d6';
-                    const parts = input.toLowerCase().split('d');
-                    const numDice = parseInt(parts[0]) || 1;
-                    const numSides = parseInt(parts[1]) || 6;
-                    if (isNaN(numDice) || isNaN(numSides) || numDice > 100 || numSides > 1000) {
-                        appendOutput('Invalid dice format. Use [number]d[sides], e.g., 2d6.');
-                        return;
-                    }
-                    let total = 0;
-                    let rolls = [];
-                    for (let i = 0; i < numDice; i++) {
-                        const roll = Math.floor(Math.random() * numSides) + 1;
-                        rolls.push(roll);
-                        total += roll;
-                    }
-                    appendOutput(`You rolled: ${rolls.join(', ')} (Total: ${total})`);
-                }},
-                'stats': { secret: true, execute: () => {
-                    const secretsTotal = Object.values(commands).filter(c => c.secret).length;
-                    appendOutput(`Commands executed: ${gameState.stats.commandsRun}\nSecret commands found: ${gameState.stats.secretsFound} / ${secretsTotal}`);
-                }},
-                'theme': { secret: true, execute: (args) => {
-                    const themes = {
-                        'default': { main: '#00ff41', glow: 'rgba(0, 255, 65, 0.75)' },
-                        'amber': { main: '#FFBF00', glow: 'rgba(255, 191, 0, 0.75)' },
-                        'ice': { main: '#00FFFF', glow: 'rgba(0, 255, 255, 0.75)' },
-                        'hacker': { main: '#39FF14', glow: 'rgba(57, 255, 20, 0.75)' },
-                        'hotpink': { main: '#FF69B4', glow: 'rgba(255, 105, 180, 0.75)' }
-                    };
-                    const themeName = args[0] || 'default';
-                    if (themes[themeName]) {
-                        document.documentElement.style.setProperty('--main-color', themes[themeName].main);
-                        document.documentElement.style.setProperty('--glow-color', themes[themeName].glow);
-                        appendOutput(`Theme set to ${themeName}.`);
-                    } else {
-                        appendOutput(`Theme not found. Available: ${Object.keys(themes).join(', ')}`);
-                    }
-                }},
-                'nyancat': { secret: true, execute: () => {
-                    appendOutput('Opening Nyan Cat in a new tab...');
-                    setTimeout(() => window.open('https://www.nyan.cat', '_blank'), 500);
-                }},
-                'credits': { secret: true, execute: () => appendOutput('This terminal was created with magic and code by Liam.') },
-                'exit': { secret: true, execute: () => commands.shutdown.execute() }, // Alias for shutdown
-                'shutdown': {
+                'roll': { secret: true, execute: (args) => { /* ... dice logic ... */ } },
+                'stats': {
                     secret: true,
                     execute: () => {
-                        appendOutput('System going down for halt NOW!');
-                        setTimeout(() => {
-                            document.body.innerHTML = '';
-                            document.body.style.backgroundColor = '#000';
-                        }, 2000);
+                        const secretsTotal = Object.values(commands).filter(c => c.secret).length;
+                        const secretsFound = gameState.foundSecrets.size;
+                        let statsOutput = `Commands executed: ${gameState.commandsRun}\nSecret commands found: ${secretsFound} / ${secretsTotal}`;
+                        
+                        if (secretsFound >= secretsTotal) {
+                            statsOutput += '\n\nCongratulations! You have found all the secrets!\n\n--- SECRET COMMAND LIST ---\n';
+                            let secretList = '';
+                            Object.keys(commands).sort().forEach(cmd => {
+                                if (commands[cmd].secret) {
+                                    secretList += `- ${cmd}\n`;
+                                }
+                            });
+                            statsOutput += secretList;
+                        }
+                        appendOutput(statsOutput);
                     }
                 },
+                'theme': { secret: true, execute: (args) => { /* ... theme logic ... */ } },
+                'nyancat': { secret: true, execute: () => { appendOutput('Opening Nyan Cat in a new tab...'); setTimeout(() => window.open('https://www.nyan.cat', '_blank'), 500); } },
+                'credits': { secret: true, execute: () => appendOutput('This terminal was created with magic and code by Liam.') },
+                'exit': { secret: true, execute: () => commands.shutdown.execute() },
+                'shutdown': { secret: true, execute: () => { appendOutput('System going down for halt NOW!'); setTimeout(() => { document.body.innerHTML = ''; document.body.style.backgroundColor = '#000'; }, 2000); } },
+                
                 // --- Command Chains ---
                 'vault': { secret: true, execute: () => { /* ... existing code ... */ } },
                 'password': { secret: true, execute: (args) => { /* ... existing code ... */ } },
@@ -619,150 +380,32 @@ You can reach out via:
                 'open': { secret: true, execute: (args) => { /* ... existing code ... */ } }
             };
 
-            // This is a placeholder to avoid re-pasting all the command chain logic.
+            // This is a placeholder to avoid re-pasting all the command/game logic.
             // In the actual implementation, the full logic from the previous version is here.
             const fullCommandLogic = {
-                'vault': {
-                    secret: true,
-                    execute: () => {
-                        if (gameState.vault.treasureCollected) { appendOutput('The vault is empty. You already took the treasure.'); }
-                        else if (gameState.vault.passwordEntered) { appendOutput('The vault is already unlocked. Type "collect" to get your reward.'); }
-                        else { appendOutput('The vault is sealed. It requires a password. Usage: password [guess]'); }
-                    }
-                },
-                'password': {
-                    secret: true,
-                    execute: (args) => {
-                        if (gameState.vault.passwordEntered) { appendOutput('The vault is already unlocked.'); return; }
-                        if (args[0] === 'secret123') {
-                            gameState.vault.passwordEntered = true;
-                            appendOutput('ACCESS GRANTED. The heavy vault door swings open. Type "collect" to see what\'s inside.');
-                        } else { appendOutput('ACCESS DENIED. Incorrect password.'); }
-                    }
-                },
-                'collect': {
-                    secret: true,
-                    execute: () => {
-                        if (gameState.vault.treasureCollected) { appendOutput('You already collected the treasure!'); }
-                        else if (gameState.vault.passwordEntered) {
-                            gameState.vault.treasureCollected = true;
-                            appendOutput('You reach inside the vault and pull out...\nA small, glowing gem. It pulses with a faint light.\nCongratulations on completing the quest!');
-                        } else { appendOutput('You can\'t collect anything. The vault is locked.'); }
-                    }
-                },
-                'reactor': {
-                    secret: true,
-                    execute: () => {
-                        let status = 'Status: OFFLINE. Power at 0%.\n';
-                        if (gameState.reactor.online) { status = 'Status: ONLINE. Power at 100%. All systems nominal.\n'; }
-                        else if (gameState.reactor.engaged) { status += 'Coils engaged. Awaiting final command.\n'; }
-                        else if (gameState.reactor.calibrated) { status += 'Calibration complete. Ready to engage coils.\n'; }
-                        else { status += 'Requires calibration. Usage: calibrate [code]\n'; }
-                        appendOutput(status);
-                    }
-                },
-                'calibrate': {
-                    secret: true,
-                    execute: (args) => {
-                        if (args[0] === 'LX-2025') {
-                            gameState.reactor.calibrated = true;
-                            appendOutput('Calibration successful. Magnetic coils are aligned. Type "engage" to proceed.');
-                        } else { appendOutput('Calibration failed. Invalid code.'); }
-                    }
-                },
-                'engage': {
-                    secret: true,
-                    execute: () => {
-                        if(gameState.reactor.calibrated) {
-                            gameState.reactor.engaged = true;
-                            appendOutput('Coils engaged. The reactor core hums with energy. Type "poweron" to bring it online.');
-                        } else { appendOutput('Cannot engage. Reactor is not calibrated.'); }
-                    }
-                },
-                'poweron': {
-                    secret: true,
-                    execute: () => {
-                        if(gameState.reactor.engaged) {
-                            gameState.reactor.online = true;
-                            appendOutput('REACTOR ONLINE. A surge of energy flows through the terminal. The screen glows brighter.');
-                            commands.theme.execute(['hacker']);
-                        } else { appendOutput('Cannot power on. Coils are not engaged.'); }
-                    }
-                },
-                'enter': {
-                    secret: true,
-                    execute: (args) => {
-                        if(args[0] === 'dungeon') {
-                            gameState.dungeon.inDungeon = true;
-                            gameState.dungeon.position = 'start';
-                            appendOutput('You have entered the dungeon. Use "look", "go [direction]", "take [item]", "unlock door".');
-                            commands.look.execute();
-                        } else { appendOutput('Enter what?'); }
-                    }
-                },
-                'look': {
-                    secret: true,
-                    execute: () => {
-                        if (!gameState.dungeon.inDungeon) { appendOutput('You are not in the dungeon.'); return; }
-                        const dungeonMap = { 'start': { description: 'You are at the entrance of a dark dungeon. A cold breeze blows from a passage to the north.', exits: { north: 'hallway' } }, 'hallway': { description: 'You are in a long hallway. There are paths leading east and west. The entrance is to the south.', exits: { south: 'start', east: 'armory', west: 'library' } }, 'armory': { description: 'This is an old armory. Rusted weapons line the walls. You see a shiny object in the corner. A locked door stands to the north.', exits: { west: 'hallway' }, item: 'key' }, 'library': { description: 'A dusty library with decaying books. A large, locked door is to the north. A strange inscription on the wall reads "The key is where the swords sleep."', exits: { east: 'hallway' } }, 'treasury': { description: 'You\'ve unlocked the door and entered the treasury! A large, ornate chest sits in the middle of the room.', exits: {}, locked: true } };
-                        const currentRoom = dungeonMap[gameState.dungeon.position];
-                        let description = currentRoom.description;
-                        if (currentRoom.item && !gameState.dungeon.hasKey) { description += ' You see a KEY here.'; }
-                        appendOutput(description);
-                    }
-                },
-                'go': {
-                    secret: true,
-                    execute: (args) => {
-                        if (!gameState.dungeon.inDungeon) { appendOutput('You are not in the dungeon.'); return; }
-                        const dungeonMap = { 'start': { exits: { north: 'hallway' } }, 'hallway': { exits: { south: 'start', east: 'armory', west: 'library' } }, 'armory': { exits: { west: 'hallway', north: gameState.dungeon.doorUnlocked ? 'treasury' : undefined } }, 'library': { exits: { east: 'hallway', north: gameState.dungeon.doorUnlocked ? 'treasury' : undefined } }, 'treasury': { exits: {} } };
-                        const direction = args[0];
-                        const currentRoom = dungeonMap[gameState.dungeon.position];
-                        if (currentRoom.exits[direction]) {
-                            gameState.dungeon.position = currentRoom.exits[direction];
-                            appendOutput(`You go ${direction}.`);
-                            commands.look.execute();
-                        } else { appendOutput('You can\'t go that way.'); }
-                    }
-                },
-                'take': {
-                    secret: true,
-                    execute: (args) => {
-                        if (!gameState.dungeon.inDungeon) { appendOutput('You are not in the dungeon.'); return; }
-                        const item = args[0];
-                        if (gameState.dungeon.position === 'armory' && item === 'key') {
-                            gameState.dungeon.hasKey = true;
-                            appendOutput('You took the key.');
-                        } else { appendOutput('There is nothing like that to take here.'); }
-                    }
-                },
-                'unlock': {
-                    secret: true,
-                    execute: (args) => {
-                        if (!gameState.dungeon.inDungeon) { appendOutput('You are not in the dungeon.'); return; }
-                        if (args[0] === 'door' && (gameState.dungeon.position === 'armory' || gameState.dungeon.position === 'library')) {
-                            if (gameState.dungeon.hasKey) {
-                                gameState.dungeon.doorUnlocked = true;
-                                appendOutput('You hear a loud *click*. The door is unlocked.');
-                            } else { appendOutput('The door is locked. You need a key.'); }
-                        } else { appendOutput('There is no door to unlock here.'); }
-                    }
-                },
-                'open': {
-                    secret: true,
-                    execute: (args) => {
-                         if (!gameState.dungeon.inDungeon) { appendOutput('You are not in the dungeon.'); return; }
-                         if (args[0] === 'chest' && gameState.dungeon.position === 'treasury') {
-                             if(gameState.dungeon.treasureOpened) { appendOutput('The chest is already empty.'); return; }
-                             gameState.dungeon.treasureOpened = true;
-                             appendOutput('You open the chest and find an ancient crown! Dungeon quest complete!');
-                             gameState.dungeon.inDungeon = false;
-                         } else { appendOutput('There is nothing to open here.'); }
-                    }
-                }
+                'guess': { description: 'Start or play "Guess the Number". Usage: guess [number]', execute: (args) => { let game = gameState.guessTheNumber; if (!game.active) { game.active = true; game.secretNumber = Math.floor(Math.random() * 100) + 1; game.attempts = 0; appendOutput('I\'m thinking of a number between 1 and 100. Try to guess it!'); return; } const userGuess = parseInt(args[0]); if (isNaN(userGuess)) { appendOutput('That\'s not a number! Try again.'); return; } game.attempts++; if (userGuess < game.secretNumber) { appendOutput('Higher...'); } else if (userGuess > game.secretNumber) { appendOutput('Lower...'); } else { appendOutput(`Correct! The number was ${game.secretNumber}. You guessed it in ${game.attempts} attempts.`); game.active = false; } } },
+                'rps': { description: 'Play Rock, Paper, Scissors. Usage: rps [rock|paper|scissors]', execute: (args) => { const choices = ['rock', 'paper', 'scissors']; const playerChoice = args[0]?.toLowerCase(); if (!choices.includes(playerChoice)) { appendOutput('Invalid choice. Please choose rock, paper, or scissors.'); return; } const computerChoice = choices[Math.floor(Math.random() * choices.length)]; appendOutput(`You chose: ${playerChoice}\nComputer chose: ${computerChoice}`); if (playerChoice === computerChoice) { appendOutput('It\'s a tie!'); } else if ((playerChoice === 'rock' && computerChoice === 'scissors') || (playerChoice === 'paper' && computerChoice === 'rock') || (playerChoice === 'scissors' && computerChoice === 'paper')) { appendOutput('You win!'); } else { appendOutput('You lose!'); } } },
+                'hacker': { secret: true, execute: () => { let i = 0; const messages = ['Accessing mainfraime...','Bypassing firewall...','Decrypting secure files...','Downloading sensitive data...','Access granted. You are in.']; const interval = setInterval(() => { if (i < messages.length) { appendOutput(messages[i]); i++; } else { clearInterval(interval); } }, 500); } },
+                'color': { secret: true, execute: (args) => { if (args.length > 0) { const newColor = args[0]; try { document.documentElement.style.setProperty('--main-color', newColor); document.documentElement.style.setProperty('--glow-color', newColor); appendOutput(`Terminal color changed to ${newColor}.`); } catch (e) { appendOutput(`Error: Invalid color "${newColor}". Try a valid CSS color.`); } } else { appendOutput('Usage: color [css-color]. Example: color hotpink'); } } },
+                'cowsay': { secret: true, execute: (args) => { const message = args.length > 0 ? args.join(' ') : 'Moooo!'; const cow = `\n        \\   ^__^\n         \\  (oo)\\_______\n            (__)\\       )\\/\\\n                ||----w |\n                ||     ||\n`; appendOutput(`< ${message} >${cow}`); } },
+                'countdown': { secret: true, execute: () => { let count = 3; const interval = setInterval(() => { if (count > 0) { appendOutput(`${count}...`); count--; } else { appendOutput('LIFTOFF!'); clearInterval(interval); } }, 700); } },
+                'roll': { secret: true, execute: (args) => { const input = args[0] || '1d6'; const parts = input.toLowerCase().split('d'); const numDice = parseInt(parts[0]) || 1; const numSides = parseInt(parts[1]) || 6; if (isNaN(numDice) || isNaN(numSides) || numDice > 100 || numSides > 1000) { appendOutput('Invalid dice format. Use [number]d[sides], e.g., 2d6.'); return; } let total = 0; let rolls = []; for (let i = 0; i < numDice; i++) { const roll = Math.floor(Math.random() * numSides) + 1; rolls.push(roll); total += roll; } appendOutput(`You rolled: ${rolls.join(', ')} (Total: ${total})`); } },
+                'theme': { secret: true, execute: (args) => { const themes = { 'default': { main: '#00ff41' }, 'amber': { main: '#FFBF00' }, 'ice': { main: '#00FFFF' }, 'hacker': { main: '#39FF14' }, 'hotpink': { main: '#FF69B4' } }; const themeName = args[0] || 'default'; if (themes[themeName]) { document.documentElement.style.setProperty('--main-color', themes[themeName].main); appendOutput(`Theme set to ${themeName}.`); } else { appendOutput(`Theme not found. Available: ${Object.keys(themes).join(', ')}`); } } },
+                'vault': { secret: true, execute: () => { if (gameState.vault.treasureCollected) { appendOutput('The vault is empty. You already took the treasure.'); } else if (gameState.vault.passwordEntered) { appendOutput('The vault is already unlocked. Type "collect" to get your reward.'); } else { appendOutput('The vault is sealed. It requires a password. Usage: password [guess]'); } } },
+                'password': { secret: true, execute: (args) => { if (gameState.vault.passwordEntered) { appendOutput('The vault is already unlocked.'); return; } if (args[0] === 'secret123') { gameState.vault.passwordEntered = true; appendOutput('ACCESS GRANTED. The heavy vault door swings open. Type "collect" to see what\'s inside.'); } else { appendOutput('ACCESS DENIED. Incorrect password.'); } } },
+                'collect': { secret: true, execute: () => { if (gameState.vault.treasureCollected) { appendOutput('You already collected the treasure!'); } else if (gameState.vault.passwordEntered) { gameState.vault.treasureCollected = true; appendOutput('You reach inside the vault and pull out...\nA small, glowing gem. It pulses with a faint light.\nCongratulations on completing the quest!'); } else { appendOutput('You can\'t collect anything. The vault is locked.'); } } },
+                'reactor': { secret: true, execute: () => { let status = 'Status: OFFLINE. Power at 0%.\n'; if (gameState.reactor.online) { status = 'Status: ONLINE. Power at 100%. All systems nominal.\n'; } else if (gameState.reactor.engaged) { status += 'Coils engaged. Awaiting final command.\n'; } else if (gameState.reactor.calibrated) { status += 'Calibration complete. Ready to engage coils.\n'; } else { status += 'Requires calibration. Usage: calibrate [code]\n'; } appendOutput(status); } },
+                'calibrate': { secret: true, execute: (args) => { if (args[0] === 'LX-2025') { gameState.reactor.calibrated = true; appendOutput('Calibration successful. Magnetic coils are aligned. Type "engage" to proceed.'); } else { appendOutput('Calibration failed. Invalid code.'); } } },
+                'engage': { secret: true, execute: () => { if(gameState.reactor.calibrated) { gameState.reactor.engaged = true; appendOutput('Coils engaged. The reactor core hums with energy. Type "poweron" to bring it online.'); } else { appendOutput('Cannot engage. Reactor is not calibrated.'); } } },
+                'poweron': { secret: true, execute: () => { if(gameState.reactor.engaged) { gameState.reactor.online = true; appendOutput('REACTOR ONLINE. A surge of energy flows through the terminal. The screen glows brighter.'); commands.theme.execute(['hacker']); } else { appendOutput('Cannot power on. Coils are not engaged.'); } } },
+                'enter': { secret: true, execute: (args) => { if(args[0] === 'dungeon') { gameState.dungeon.inDungeon = true; gameState.dungeon.position = 'start'; appendOutput('You have entered the dungeon. Use "look", "go [direction]", "take [item]", "unlock door".'); commands.look.execute(); } else { appendOutput('Enter what?'); } } },
+                'look': { secret: true, execute: () => { if (!gameState.dungeon.inDungeon) { appendOutput('You are not in the dungeon.'); return; } const dungeonMap = { 'start': { description: 'You are at the entrance of a dark dungeon. A cold breeze blows from a passage to the north.', exits: { north: 'hallway' } }, 'hallway': { description: 'You are in a long hallway. There are paths leading east and west. The entrance is to the south.', exits: { south: 'start', east: 'armory', west: 'library' } }, 'armory': { description: 'This is an old armory. Rusted weapons line the walls. A locked door stands to the north.', exits: { west: 'hallway' }, item: 'key' }, 'library': { description: 'A dusty library with decaying books. A large, locked door is to the north. A strange inscription on the wall reads "The key is where the swords sleep."', exits: { east: 'hallway' } }, 'treasury': { description: 'You\'ve unlocked the door and entered the treasury! A large, ornate chest sits in the middle of the room.', exits: {}, locked: true } }; const currentRoom = dungeonMap[gameState.dungeon.position]; let description = currentRoom.description; if (currentRoom.item && !gameState.dungeon.hasKey && gameState.dungeon.position === 'armory') { description += ' You see a KEY here.'; } appendOutput(description); } },
+                'go': { secret: true, execute: (args) => { if (!gameState.dungeon.inDungeon) { appendOutput('You are not in the dungeon.'); return; } const dungeonMap = { 'start': { exits: { north: 'hallway' } }, 'hallway': { exits: { south: 'start', east: 'armory', west: 'library' } }, 'armory': { exits: { west: 'hallway' } }, 'library': { exits: { east: 'hallway' } }, 'treasury': { exits: {} } }; if (gameState.dungeon.doorUnlocked) { dungeonMap.armory.exits.north = 'treasury'; dungeonMap.library.exits.north = 'treasury'; } const direction = args[0]; const currentRoom = dungeonMap[gameState.dungeon.position]; if (currentRoom.exits[direction]) { gameState.dungeon.position = currentRoom.exits[direction]; appendOutput(`You go ${direction}.`); commands.look.execute(); } else { appendOutput('You can\'t go that way.'); } } },
+                'take': { secret: true, execute: (args) => { if (!gameState.dungeon.inDungeon) { appendOutput('You are not in the dungeon.'); return; } const item = args[0]; if (gameState.dungeon.position === 'armory' && item === 'key' && !gameState.dungeon.hasKey) { gameState.dungeon.hasKey = true; appendOutput('You took the key.'); } else { appendOutput('There is nothing like that to take here.'); } } },
+                'unlock': { secret: true, execute: (args) => { if (!gameState.dungeon.inDungeon) { appendOutput('You are not in the dungeon.'); return; } if (args[0] === 'door' && (gameState.dungeon.position === 'armory' || gameState.dungeon.position === 'library')) { if (gameState.dungeon.hasKey) { gameState.dungeon.doorUnlocked = true; appendOutput('You hear a loud *click*. The door is unlocked.'); } else { appendOutput('The door is locked. You need a key.'); } } else { appendOutput('There is no door to unlock here.'); } } },
+                'open': { secret: true, execute: (args) => { if (!gameState.dungeon.inDungeon) { appendOutput('You are not in the dungeon.'); return; } if (args[0] === 'chest' && gameState.dungeon.position === 'treasury') { if(gameState.dungeon.treasureOpened) { appendOutput('The chest is already empty.'); return; } gameState.dungeon.treasureOpened = true; appendOutput('You open the chest and find an ancient crown! Dungeon quest complete!'); gameState.dungeon.inDungeon = false; } else { appendOutput('There is nothing to open here.'); } } }
             };
             Object.assign(commands, fullCommandLogic);
-
 
             const processCommand = (cmdStr) => {
                 const [command, ...args] = cmdStr.trim().split(' ');
@@ -771,11 +414,11 @@ You can reach out via:
                 appendOutput(cmdStr, true);
                 commandHistory.unshift(cmdStr);
                 historyIndex = -1;
-                gameState.stats.commandsRun++;
+                gameState.commandsRun++;
 
                 if (commands[command]) {
                     if (commands[command].secret) {
-                        gameState.stats.secretsFound++;
+                        gameState.foundSecrets.add(command);
                     }
                     commands[command].execute(args);
                 } else {
